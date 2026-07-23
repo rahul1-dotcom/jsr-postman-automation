@@ -36,18 +36,12 @@ export function handlePostResponse(
     }
 
     if (pm.response.code === 200) {
-        // 1. Process Validation Object
+        // 1. Process Validation Object (JSONPath expression) - validate only, no collection variables set
         if (validationObject) {
             validatedValue = getNestedValue(jsonData, validationObject);
 
-            if (validatedValue !== undefined && validatedValue !== null) {
-                // Extract last property key from path to use as variable name (e.g. "ShipmentId")
-                const varName = validationObject.split('.').pop()?.replace(/\[\d+\]/g, '') || "ValidationValue";
-                console.log(`✅ Found [${varName}]: ${validatedValue}`);
-                pm.collectionVariables.set(varName, validatedValue);
-            } else {
-                console.log(`⚠️ "${validationObject}" not found in response.`);
-            }
+            const isValid = validatedValue !== undefined && validatedValue !== null;
+            console.log(`Validation "${validationObject}": ${isValid}`);
         }
 
         // 2. Capture and Save Data Objects to Collection Variables
