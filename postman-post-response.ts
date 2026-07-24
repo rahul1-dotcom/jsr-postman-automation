@@ -98,7 +98,9 @@ export function handlePostResponse(
                 isValid = validatedValue !== undefined && validatedValue !== null;
             }
 
-            console.log(`Validation "${validationObject}": ${isValid}`);
+            console.log(isValid
+                ? `✅ Validation "${validationObject}" is a success.`
+                : `❌ Validation "${validationObject}" is a failure.`);
         }
 
         // 2. Capture and Save Data Objects to Collection Variables
@@ -122,7 +124,7 @@ export function handlePostResponse(
 
     if (pm.response.code !== 200 || !validatedValue || !lastRequest || isLastRequest) {
         // Hard failure: assert and route to dynamic Controller
-        pm.test("Invoice Search", function () {
+        pm.test("Validation", function () {
             pm.expect(Boolean(validatedValue), `Validation failed: Path "${validationObject}" was not found or response was invalid.`).to.be.true;
         });
         pm.execution.setNextRequest(controllerName);
@@ -145,9 +147,9 @@ export function handleDataRunnerResponse(pm: any): void {
         pm.collectionVariables.set("ID_LIST", JSON.stringify(ids));
         pm.collectionVariables.set("ID_INDEX", "0");
         pm.collectionVariables.set("OBJECT_NAME", responseJson.OBJECT_NAME);
-        console.log("Loaded " + ids.length + " OBJECT_IDs: " + ids.join(", "));
+        console.log("📥 Loaded " + ids.length + " OBJECT_IDs: " + ids.join(", "));
     } else {
-        console.error("No data found!");
+        console.error("❌ No data found!");
         pm.expect.fail("No data found!");
     }
 }
