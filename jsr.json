@@ -1,6 +1,6 @@
 {
   "name": "@rahulhomkar/postman-validations",
-  "version": "1.0",
+  "version": "1.0.0",
   "license": "MIT",
   "exports": "./postman-post-response.ts"
 }
