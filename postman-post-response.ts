@@ -167,21 +167,24 @@ function parseXmlToObject(xmlString: string): any {
     }
 
     const rootName = rootMatch[1];
-    const rootObj: any = {};
 
-    // Simple recursive parsing
-    const parseElement = (xml: string, tagName: string): any => {
+    // Recursive parsing that handles nested elements correctly
+    const parseElement = (xml: string): any => {
         const obj: any = {};
 
-        // Extract attributes from opening tag
-        const openTagRegex = new RegExp(`<${tagName}\\s+([^>]*?)>`, 'i');
-        const openTagMatch = xml.match(openTagRegex);
-        if (openTagMatch && openTagMatch[1]) {
+        // Extract opening tag with name
+        const openTagMatch = xml.match(/<(\w+[:\w]*)(?:\s([^>]*?))?>/);
+        if (!openTagMatch) return null;
+
+        const tagName = openTagMatch[1];
+        const attrString = openTagMatch[2];
+
+        // Parse attributes if present
+        if (attrString) {
             const attrs: any = {};
-            const attrText = openTagMatch[1];
             const attrsRegex = /(\w+)=["']([^"']*?)["']/g;
             let m;
-            while ((m = attrsRegex.exec(attrText)) !== null) {
+            while ((m = attrsRegex.exec(attrString)) !== null) {
                 attrs[m[1]] = m[2];
             }
             if (Object.keys(attrs).length > 0) {
@@ -190,63 +193,45 @@ function parseXmlToObject(xmlString: string): any {
         }
 
         // Extract inner content between opening and closing tags
-        const contentRegex = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)</${tagName}>`, 'i');
+        const contentRegex = new RegExp(`<${tagName}[^>]*>([\\s\\S]*)</${tagName}>`, 'i');
         const contentMatch = xml.match(contentRegex);
         if (!contentMatch) return null;
 
         const innerContent = contentMatch[1];
 
-        // Check if it's purely text content (no child elements)
-        if (!innerContent.includes('<')) {
-            const trimmedText = innerContent.trim();
-            if (trimmedText) {
-                obj['#text'] = trimmedText;
-            }
+        // If no child elements, just extract text
+        if (!innerContent.match(/<\w+[:\w]*[^>]*>/)) {
+            const text = innerContent.trim();
+            if (text) obj['#text'] = text;
             return Object.keys(obj).length === 0 ? null : obj;
         }
 
-        // Extract child elements from inner content only
-        const childRegex = /<(\w+[:\w]*)(?:\s[^>]*)?>[\s\S]*?<\/\1>/gi;
+        // Parse child elements
+        const childTagRegex = /<(\w+[:\w]*)(?:\s[^>]*)?>[\s\S]*?<\/\1>/gi;
         let childMatch;
-        const processedTags = new Set<string>();
-        const children: any = {};
 
-        // Find all unique child tag names
-        const tagNameRegex = /<(\w+[:\w]*)(?:\s[^>]*)?>[\s\S]*?<\/\1>/gi;
-        let match;
-        const uniqueTags = new Set<string>();
-        while ((match = tagNameRegex.exec(innerContent)) !== null) {
-            uniqueTags.add(match[1].toLowerCase());
-        }
+        while ((childMatch = childTagRegex.exec(innerContent)) !== null) {
+            const childXml = childMatch[0];
+            const childObj = parseElement(childXml);
 
-        // Process each unique child tag
-        for (const childTagName of uniqueTags) {
-            const childRegexForTag = new RegExp(`<${childTagName}[^>]*>[\\s\\S]*?</${childTagName}>`, 'gi');
-            let childContentMatch;
-
-            while ((childContentMatch = childRegexForTag.exec(innerContent)) !== null) {
-                const childXml = childContentMatch[0];
-                const childObj = parseElement(childXml, childTagName);
-
-                if (childObj !== null) {
-                    if (children[childTagName]) {
-                        if (!Array.isArray(children[childTagName])) {
-                            children[childTagName] = [children[childTagName]];
-                        }
-                        children[childTagName].push(childObj);
-                    } else {
-                        children[childTagName] = childObj;
+            if (childObj !== null) {
+                // Extract tag name from child XML
+                const childTagName = childMatch[1];
+                if (obj[childTagName]) {
+                    if (!Array.isArray(obj[childTagName])) {
+                        obj[childTagName] = [obj[childTagName]];
                     }
+                    obj[childTagName].push(childObj);
+                } else {
+                    obj[childTagName] = childObj;
                 }
             }
         }
 
-        Object.assign(obj, children);
         return Object.keys(obj).length === 0 ? null : obj;
     };
 
-    rootObj[rootName] = parseElement(trimmed, rootName);
-    return rootObj;
+    return { [rootName]: parseElement(trimmed) };
 }
 
 /**
