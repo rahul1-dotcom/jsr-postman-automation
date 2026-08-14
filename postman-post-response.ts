@@ -275,14 +275,16 @@ function getXmlValue(obj: any, path: string): any {
  *
  * @param pm The Postman execution context (`pm`)
  * @param controllerName Target request name for setNextRequest on failure (e.g., "Controller")
- * @param validationObject XPath-like expression to validate against the response (e.g., "root/element[0]/child")
+ * @param validationObject XPath-like expression to validate against the response (e.g., "/SHIPMENT/SERVICE")
  * @param captureDataObject Array of XPath-like expressions to capture and set as collection variables
+ * @param expectedValue Optional expected value to compare against validationObject path
  */
 export function handlePostResponseXML(
     pm: any,
     controllerName: string = "Controller",
     validationObject?: string,
-    captureDataObject: string[] = []
+    captureDataObject: string[] = [],
+    expectedValue?: string
 ): void {
     let validatedValue: any = null;
     let xmlObject: any = {};
@@ -298,11 +300,22 @@ export function handlePostResponseXML(
         // 1. Process Validation Object (XPath expression) - validate only, no collection variables set
         if (validationObject) {
             validatedValue = getXmlValue(xmlObject, validationObject);
-            const isValid = validatedValue !== undefined && validatedValue !== null;
 
-            console.log(isValid
-                ? `✅ Validation "${validationObject}" is a success.`
-                : `❌ Validation "${validationObject}" is a failure.`);
+            let isValid: boolean;
+            if (expectedValue !== undefined) {
+                // Compare against expected value
+                isValid = validatedValue === expectedValue;
+                console.log(isValid
+                    ? `✅ Validation "${validationObject}" == "${expectedValue}" is a success.`
+                    : `❌ Validation "${validationObject}" == "${expectedValue}" is a failure. Got: "${validatedValue}"`);
+            } else {
+                // Just check if value exists
+                isValid = validatedValue !== undefined && validatedValue !== null;
+                console.log(isValid
+                    ? `✅ Validation "${validationObject}" is a success.`
+                    : `❌ Validation "${validationObject}" is a failure.`);
+            }
+            validatedValue = isValid ? validatedValue : null;
         }
 
         // 2. Capture and Save Data Objects to Collection Variables
