@@ -1,3 +1,5 @@
+/// <reference lib="dom" />
+
 /**
  * Safely resolves nested property paths from an object (e.g., "data[0].FreightShipment[0].ShipmentId")
  */
@@ -151,6 +153,171 @@ export function handleDataRunnerResponse(pm: any): void {
     } else {
         console.error("❌ No data found!");
         pm.expect.fail("No data found!");
+    }
+}
+
+/**
+ * Parses XML response to a nested object structure
+ */
+function parseXmlToObject(xmlString: string): any {
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlString, 'text/xml');
+
+    // Check for parsing errors
+    const parserError = (xmlDoc as any).parseError;
+    if (parserError && parserError.errorCode !== 0) {
+        throw new Error(`XML Parse Error: ${parserError.reason}`);
+    }
+
+    if (!xmlDoc.documentElement) {
+        throw new Error('Invalid XML: no document element found');
+    }
+
+    return xmlElementToObject(xmlDoc.documentElement);
+}
+
+/**
+ * Recursively converts an XML element and its children to a nested object
+ */
+function xmlElementToObject(element: any): any {
+    const obj: any = {};
+
+    // Add attributes
+    if (element.attributes && element.attributes.length > 0) {
+        obj['@attributes'] = {};
+        for (let i = 0; i < element.attributes.length; i++) {
+            const attr = element.attributes[i];
+            obj['@attributes'][attr.name] = attr.value;
+        }
+    }
+
+    // Add child elements
+    const childNodes = element.childNodes;
+    const children: any = {};
+
+    for (let i = 0; i < childNodes.length; i++) {
+        const node = childNodes[i];
+
+        if (node.nodeType === 1) { // Element node
+            const nodeName = node.nodeName;
+            const childObj = xmlElementToObject(node);
+
+            if (children[nodeName]) {
+                if (!Array.isArray(children[nodeName])) {
+                    children[nodeName] = [children[nodeName]];
+                }
+                children[nodeName].push(childObj);
+            } else {
+                children[nodeName] = childObj;
+            }
+        } else if (node.nodeType === 3) { // Text node
+            const text = node.nodeValue?.trim();
+            if (text) {
+                obj['#text'] = text;
+            }
+        }
+    }
+
+    Object.assign(obj, children);
+    return Object.keys(obj).length === 0 ? null : obj;
+}
+
+/**
+ * Retrieves a value from XML object using XPath-like notation (e.g., "root/element[0]/child")
+ */
+function getXmlValue(obj: any, path: string): any {
+    if (!obj || !path) return undefined;
+
+    const parts = path.split('/').filter(p => p);
+    let current = obj;
+
+    for (const part of parts) {
+        if (!current) return undefined;
+
+        // Handle array index notation: element[0]
+        const match = part.match(/^(\w+)(?:\[(\d+)\])?$/);
+        if (!match) return undefined;
+
+        const [, key, index] = match;
+        current = current[key];
+
+        if (index !== undefined) {
+            if (Array.isArray(current)) {
+                current = current[parseInt(index)];
+            } else {
+                return undefined;
+            }
+        }
+    }
+
+    // Extract text content if it's an object with #text property
+    if (current && typeof current === 'object' && current['#text'] !== undefined) {
+        return current['#text'];
+    }
+
+    return current;
+}
+
+/**
+ * Handles Postman post-response validation, dynamic data capture, and workflow routing for XML payloads.
+ *
+ * @param pm The Postman execution context (`pm`)
+ * @param controllerName Target request name for setNextRequest on failure (e.g., "Controller")
+ * @param validationObject XPath-like expression to validate against the response (e.g., "root/element[0]/child")
+ * @param captureDataObject Array of XPath-like expressions to capture and set as collection variables
+ */
+export function handlePostResponseXML(
+    pm: any,
+    controllerName: string = "Controller",
+    validationObject?: string,
+    captureDataObject: string[] = []
+): void {
+    let validatedValue: any = null;
+    let xmlObject: any = {};
+
+    try {
+        const xmlString = pm.response.text();
+        xmlObject = parseXmlToObject(xmlString);
+    } catch (e) {
+        console.error("❌ Failed to parse XML response:", (e as Error).message);
+    }
+
+    if (pm.response.code === 200) {
+        // 1. Process Validation Object (XPath expression) - validate only, no collection variables set
+        if (validationObject) {
+            validatedValue = getXmlValue(xmlObject, validationObject);
+            const isValid = validatedValue !== undefined && validatedValue !== null;
+
+            console.log(isValid
+                ? `✅ Validation "${validationObject}" is a success.`
+                : `❌ Validation "${validationObject}" is a failure.`);
+        }
+
+        // 2. Capture and Save Data Objects to Collection Variables
+        if (Array.isArray(captureDataObject)) {
+            captureDataObject.forEach(path => {
+                const capturedValue = getXmlValue(xmlObject, path);
+                if (capturedValue !== undefined && capturedValue !== null) {
+                    const varName = path.split('/').pop()?.replace(/\[\d+\]/g, '') || path;
+                    pm.collectionVariables.set(varName, capturedValue);
+                    console.log(`📦 Captured [${varName}]:`, capturedValue);
+                } else {
+                    console.log(`⚠️ Could not capture path "${path}" - Path not found.`);
+                }
+            });
+        }
+    }
+
+    // 3. Workflow Routing & Hard Assertions
+    const lastRequest = pm.collectionVariables.get("LAST-REQUEST");
+    const isLastRequest = pm.info.requestName === lastRequest;
+
+    if (pm.response.code !== 200 || !validatedValue || !lastRequest || isLastRequest) {
+        // Hard failure: assert and route to dynamic Controller
+        pm.test("Validation", function () {
+            pm.expect(Boolean(validatedValue), `Validation failed: Path "${validationObject}" was not found or response was invalid.`).to.be.true;
+        });
+        pm.execution.setNextRequest(controllerName);
     }
 }
 
