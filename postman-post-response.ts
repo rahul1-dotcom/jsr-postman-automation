@@ -154,113 +154,83 @@ export function handleDataRunnerResponse(pm: any): void {
     }
 }
 
-interface XMLDocument {
-    documentElement: Element | null;
-    parseError?: { errorCode: number; reason: string };
-}
-
-interface Element {
-    nodeName: string;
-    nodeValue?: string | null;
-    nodeType: number;
-    attributes: NamedNodeMap | null;
-    childNodes: NodeList;
-}
-
-interface NamedNodeMap {
-    length: number;
-    [index: number]: Attr;
-}
-
-interface Attr {
-    name: string;
-    value: string;
-}
-
-interface NodeList {
-    length: number;
-    [index: number]: Node;
-}
-
-interface Node {
-    nodeType: number;
-    nodeName: string;
-    nodeValue?: string | null;
-    childNodes: NodeList;
-}
-
-interface DOMParser {
-    parseFromString(xml: string, type: string): XMLDocument;
-}
-
-declare class DOMParser {
-    parseFromString(xml: string, type: string): XMLDocument;
-}
-
 /**
- * Parses XML response to a nested object structure
+ * Lightweight XML parser that works in both Node.js and browser environments
  */
 function parseXmlToObject(xmlString: string): any {
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlString, 'text/xml');
+    const trimmed = xmlString.trim();
 
-    // Check for parsing errors
-    const parserError = (xmlDoc as any).parseError;
-    if (parserError && parserError.errorCode !== 0) {
-        throw new Error(`XML Parse Error: ${parserError.reason}`);
+    // Find root element
+    const rootMatch = trimmed.match(/<(\w+[:\w]*)\s*([^>]*)>/);
+    if (!rootMatch) {
+        throw new Error('Invalid XML: no root element found');
     }
 
-    if (!xmlDoc.documentElement) {
-        throw new Error('Invalid XML: no document element found');
-    }
+    const rootName = rootMatch[1];
+    const rootObj: any = {};
 
-    return xmlElementToObject(xmlDoc.documentElement);
-}
+    // Simple recursive parsing
+    const parseElement = (xml: string, tagName: string): any => {
+        const obj: any = {};
 
-/**
- * Recursively converts an XML element and its children to a nested object
- */
-function xmlElementToObject(element: any): any {
-    const obj: any = {};
-
-    // Add attributes
-    if (element.attributes && element.attributes.length > 0) {
-        obj['@attributes'] = {};
-        for (let i = 0; i < element.attributes.length; i++) {
-            const attr = element.attributes[i];
-            obj['@attributes'][attr.name] = attr.value;
+        // Extract attributes
+        const attrRegex = new RegExp(`<${tagName}\\s+([^>]*?)>`);
+        const attrMatch = xml.match(attrRegex);
+        if (attrMatch && attrMatch[1]) {
+            const attrs: any = {};
+            const attrText = attrMatch[1];
+            const attrsRegex = /(\w+)=["']([^"']*?)["']/g;
+            let m;
+            while ((m = attrsRegex.exec(attrText)) !== null) {
+                attrs[m[1]] = m[2];
+            }
+            if (Object.keys(attrs).length > 0) {
+                obj['@attributes'] = attrs;
+            }
         }
-    }
 
-    // Add child elements
-    const childNodes = element.childNodes;
-    const children: any = {};
+        // Extract text content
+        const textRegex = new RegExp(`<${tagName}[^>]*>([^<]*)</${tagName}>`);
+        const textMatch = xml.match(textRegex);
+        if (textMatch && textMatch[1]?.trim()) {
+            obj['#text'] = textMatch[1].trim();
+        }
 
-    for (let i = 0; i < childNodes.length; i++) {
-        const node = childNodes[i];
+        // Extract child elements
+        const childRegex = new RegExp(`<(\\w+[:\\w]*)(?:\\s[^>]*)?>`, 'g');
+        let childMatch;
+        const children: any = {};
 
-        if (node.nodeType === 1) { // Element node
-            const nodeName = node.nodeName;
-            const childObj = xmlElementToObject(node);
+        while ((childMatch = childRegex.exec(xml)) !== null) {
+            const childTagName = childMatch[1];
+            if (childTagName === tagName) continue; // Skip self
 
-            if (children[nodeName]) {
-                if (!Array.isArray(children[nodeName])) {
-                    children[nodeName] = [children[nodeName]];
+            const childContent = extractElement(xml, childTagName);
+            if (childContent) {
+                const childObj = parseElement(childContent, childTagName);
+                if (children[childTagName]) {
+                    if (!Array.isArray(children[childTagName])) {
+                        children[childTagName] = [children[childTagName]];
+                    }
+                    children[childTagName].push(childObj);
+                } else {
+                    children[childTagName] = childObj;
                 }
-                children[nodeName].push(childObj);
-            } else {
-                children[nodeName] = childObj;
-            }
-        } else if (node.nodeType === 3) { // Text node
-            const text = node.nodeValue?.trim();
-            if (text) {
-                obj['#text'] = text;
             }
         }
-    }
 
-    Object.assign(obj, children);
-    return Object.keys(obj).length === 0 ? null : obj;
+        Object.assign(obj, children);
+        return Object.keys(obj).length === 0 ? null : obj;
+    };
+
+    const extractElement = (xml: string, tagName: string): string => {
+        const regex = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)</${tagName}>`, 'i');
+        const match = xml.match(regex);
+        return match ? match[0] : '';
+    };
+
+    rootObj[rootName] = parseElement(trimmed, rootName);
+    return rootObj[rootName];
 }
 
 /**
