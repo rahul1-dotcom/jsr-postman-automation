@@ -1,5 +1,3 @@
-/// <reference lib="dom" />
-
 /**
  * Safely resolves nested property paths from an object (e.g., "data[0].FreightShipment[0].ShipmentId")
  */
@@ -154,6 +152,49 @@ export function handleDataRunnerResponse(pm: any): void {
         console.error("❌ No data found!");
         pm.expect.fail("No data found!");
     }
+}
+
+interface XMLDocument {
+    documentElement: Element | null;
+    parseError?: { errorCode: number; reason: string };
+}
+
+interface Element {
+    nodeName: string;
+    nodeValue?: string | null;
+    nodeType: number;
+    attributes: NamedNodeMap | null;
+    childNodes: NodeList;
+}
+
+interface NamedNodeMap {
+    length: number;
+    [index: number]: Attr;
+}
+
+interface Attr {
+    name: string;
+    value: string;
+}
+
+interface NodeList {
+    length: number;
+    [index: number]: Node;
+}
+
+interface Node {
+    nodeType: number;
+    nodeName: string;
+    nodeValue?: string | null;
+    childNodes: NodeList;
+}
+
+interface DOMParser {
+    parseFromString(xml: string, type: string): XMLDocument;
+}
+
+declare class DOMParser {
+    parseFromString(xml: string, type: string): XMLDocument;
 }
 
 /**
