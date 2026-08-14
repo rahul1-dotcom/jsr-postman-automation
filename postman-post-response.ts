@@ -277,7 +277,15 @@ function getXmlValue(obj: any, path: string): any {
  * @param controllerName Target request name for setNextRequest on failure (e.g., "Controller")
  * @param validationObject XPath-like expression to validate against the response (e.g., "/SHIPMENT/SERVICE")
  * @param captureDataObject Array of XPath-like expressions to capture and set as collection variables
- * @param expectedValue Optional expected value to compare against validationObject path
+ * @param expectedValue Optional validation rule - supports operators:
+ *   - "value" or "== value" - exact match (default)
+ *   - "!= value" - not equal
+ *   - "> number" - greater than
+ *   - "< number" - less than
+ *   - ">= number" - greater than or equal
+ *   - "<= number" - less than or equal
+ *   - "~ regex_pattern" - regex match (e.g., "~ .*USPS.*")
+ *   - "contains substring" - contains text
  */
 export function handlePostResponseXML(
     pm: any,
@@ -303,11 +311,57 @@ export function handlePostResponseXML(
 
             let isValid: boolean;
             if (expectedValue !== undefined) {
-                // Compare against expected value
-                isValid = validatedValue === expectedValue;
+                // Parse operator and value from expectedValue
+                const operatorMatch = expectedValue.match(/^(!=|!==|===|==|>=|<=|>|<|~|contains)\s*(.*)$/);
+                let operator = '==';
+                let expectedVal = expectedValue;
+
+                if (operatorMatch) {
+                    operator = operatorMatch[1];
+                    expectedVal = operatorMatch[2];
+                }
+
+                // Perform validation based on operator
+                switch (operator) {
+                    case '==':
+                    case '===':
+                        isValid = validatedValue === expectedVal;
+                        break;
+                    case '!=':
+                    case '!==':
+                        isValid = validatedValue !== expectedVal;
+                        break;
+                    case '>':
+                        isValid = Number(validatedValue) > Number(expectedVal);
+                        break;
+                    case '<':
+                        isValid = Number(validatedValue) < Number(expectedVal);
+                        break;
+                    case '>=':
+                        isValid = Number(validatedValue) >= Number(expectedVal);
+                        break;
+                    case '<=':
+                        isValid = Number(validatedValue) <= Number(expectedVal);
+                        break;
+                    case '~':
+                        // Regex match
+                        try {
+                            const regex = new RegExp(expectedVal);
+                            isValid = regex.test(validatedValue);
+                        } catch (e) {
+                            isValid = false;
+                        }
+                        break;
+                    case 'contains':
+                        isValid = String(validatedValue).includes(expectedVal);
+                        break;
+                    default:
+                        isValid = validatedValue === expectedVal;
+                }
+
                 console.log(isValid
-                    ? `✅ Validation "${validationObject}" == "${expectedValue}" is a success.`
-                    : `❌ Validation "${validationObject}" == "${expectedValue}" is a failure. Got: "${validatedValue}"`);
+                    ? `✅ Validation "${validationObject}" ${operator} "${expectedVal}" is a success.`
+                    : `❌ Validation "${validationObject}" ${operator} "${expectedVal}" is a failure. Got: "${validatedValue}"`);
             } else {
                 // Just check if value exists
                 isValid = validatedValue !== undefined && validatedValue !== null;
