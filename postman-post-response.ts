@@ -234,7 +234,7 @@ function parseXmlToObject(xmlString: string): any {
 }
 
 /**
- * Retrieves a value from XML object using XPath-like notation (e.g., "root/element[0]/child")
+ * Retrieves a value from XML object using XPath-like notation (e.g., "/SHIPMENT/PACKAGE/PS_VOID_ID" or "root/element[0]/child")
  */
 function getXmlValue(obj: any, path: string): any {
     if (!obj || !path) return undefined;
@@ -246,7 +246,7 @@ function getXmlValue(obj: any, path: string): any {
         if (!current) return undefined;
 
         // Handle array index notation: element[0]
-        const match = part.match(/^(\w+)(?:\[(\d+)\])?$/);
+        const match = part.match(/^(\w+[:\w]*)(?:\[(\d+)\])?$/);
         if (!match) return undefined;
 
         const [, key, index] = match;
