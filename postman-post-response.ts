@@ -246,7 +246,7 @@ function parseXmlToObject(xmlString: string): any {
     };
 
     rootObj[rootName] = parseElement(trimmed, rootName);
-    return rootObj[rootName];
+    return rootObj;
 }
 
 /**
