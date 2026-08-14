@@ -235,7 +235,71 @@ function parseXmlToObject(xmlString: string): any {
 }
 
 /**
- * Retrieves a value from XML object using XPath-like notation (e.g., "/SHIPMENT/PACKAGE/PS_VOID_ID" or "root/element[0]/child")
+ * Evaluates XPath predicates (e.g., text()='value', text()!='value', contains(text(),'value'))
+ */
+function evaluateXPathPredicate(value: any, predicate: string): boolean {
+    const text = String(value).trim();
+
+    // text() = 'value'
+    if (predicate.match(/text\(\)\s*=\s*['"]([^'"]*)['"]/)) {
+        const match = predicate.match(/text\(\)\s*=\s*['"]([^'"]*)['"]/);
+        return text === match![1];
+    }
+
+    // text() != 'value' or text() !== 'value'
+    if (predicate.match(/text\(\)\s*(!==?)\s*['"]([^'"]*)['"]/)) {
+        const match = predicate.match(/text\(\)\s*(!==?)\s*['"]([^'"]*)['"]/);
+        return text !== match![2];
+    }
+
+    // text() > number
+    if (predicate.match(/text\(\)\s*>\s*(-?\d+\.?\d*)/)) {
+        const match = predicate.match(/text\(\)\s*>\s*(-?\d+\.?\d*)/);
+        return Number(text) > Number(match![1]);
+    }
+
+    // text() < number
+    if (predicate.match(/text\(\)\s*<\s*(-?\d+\.?\d*)/)) {
+        const match = predicate.match(/text\(\)\s*<\s*(-?\d+\.?\d*)/);
+        return Number(text) < Number(match![1]);
+    }
+
+    // text() >= number
+    if (predicate.match(/text\(\)\s*>=\s*(-?\d+\.?\d*)/)) {
+        const match = predicate.match(/text\(\)\s*>=\s*(-?\d+\.?\d*)/);
+        return Number(text) >= Number(match![1]);
+    }
+
+    // text() <= number
+    if (predicate.match(/text\(\)\s*<=\s*(-?\d+\.?\d*)/)) {
+        const match = predicate.match(/text\(\)\s*<=\s*(-?\d+\.?\d*)/);
+        return Number(text) <= Number(match![1]);
+    }
+
+    // contains(text(), 'substring')
+    if (predicate.match(/contains\s*\(\s*text\(\)\s*,\s*['"]([^'"]*)['"]\s*\)/)) {
+        const match = predicate.match(/contains\s*\(\s*text\(\)\s*,\s*['"]([^'"]*)['"]\s*\)/);
+        return text.includes(match![1]);
+    }
+
+    // starts-with(text(), 'prefix')
+    if (predicate.match(/starts-with\s*\(\s*text\(\)\s*,\s*['"]([^'"]*)['"]\s*\)/)) {
+        const match = predicate.match(/starts-with\s*\(\s*text\(\)\s*,\s*['"]([^'"]*)['"]\s*\)/);
+        return text.startsWith(match![1]);
+    }
+
+    // normalize-space(text()) = 'value'
+    if (predicate.match(/normalize-space\s*\(\s*text\(\)\s*\)\s*=\s*['"]([^'"]*)['"]/)) {
+        const match = predicate.match(/normalize-space\s*\(\s*text\(\)\s*\)\s*=\s*['"]([^'"]*)['"]/);
+        return text.trim() === match![1];
+    }
+
+    return false;
+}
+
+/**
+ * Retrieves a value from XML object using XPath-like notation with predicate support
+ * Examples: "/SHIPMENT/SERVICE", "/SHIPMENT/SERVICE[text()='BWTI_USPS.USPS.FCSP']"
  */
 function getXmlValue(obj: any, path: string): any {
     if (!obj || !path) return undefined;
@@ -246,18 +310,37 @@ function getXmlValue(obj: any, path: string): any {
     for (const part of parts) {
         if (!current) return undefined;
 
-        // Handle array index notation: element[0]
-        const match = part.match(/^(\w+[:\w]*)(?:\[(\d+)\])?$/);
-        if (!match) return undefined;
+        // Handle predicate notation: element[predicate] or element[index]
+        const predicateMatch = part.match(/^(\w+[:\w]*)(?:\[([^\]]+)\])?$/);
+        if (!predicateMatch) return undefined;
 
-        const [, key, index] = match;
+        const [, key, predicateOrIndex] = predicateMatch;
         current = current[key];
 
-        if (index !== undefined) {
+        if (!current) return undefined;
+
+        // Handle array index notation: element[0]
+        if (predicateOrIndex && /^\d+$/.test(predicateOrIndex)) {
+            const index = parseInt(predicateOrIndex);
             if (Array.isArray(current)) {
-                current = current[parseInt(index)];
+                current = current[index];
             } else {
                 return undefined;
+            }
+        } else if (predicateOrIndex) {
+            // Handle XPath predicate: element[text()='value']
+            if (Array.isArray(current)) {
+                // Find first matching element in array
+                const found = current.find(item => evaluateXPathPredicate(
+                    item['#text'] || item,
+                    predicateOrIndex
+                ));
+                current = found;
+            } else {
+                // Single element - evaluate predicate
+                const textValue = current['#text'] || current;
+                const matches = evaluateXPathPredicate(textValue, predicateOrIndex);
+                if (!matches) return undefined;
             }
         }
     }
@@ -272,27 +355,27 @@ function getXmlValue(obj: any, path: string): any {
 
 /**
  * Handles Postman post-response validation, dynamic data capture, and workflow routing for XML payloads.
+ * Supports full XPath-like expressions with predicates.
  *
  * @param pm The Postman execution context (`pm`)
  * @param controllerName Target request name for setNextRequest on failure (e.g., "Controller")
- * @param validationObject XPath-like expression to validate against the response (e.g., "/SHIPMENT/SERVICE")
- * @param captureDataObject Array of XPath-like expressions to capture and set as collection variables
- * @param expectedValue Optional validation rule - supports operators:
- *   - "value" or "== value" - exact match (default)
- *   - "!= value" - not equal
- *   - "> number" - greater than
- *   - "< number" - less than
- *   - ">= number" - greater than or equal
- *   - "<= number" - less than or equal
- *   - "~ regex_pattern" - regex match (e.g., "~ .*USPS.*")
- *   - "contains substring" - contains text
+ * @param validationObject XPath expression with optional predicates (e.g., "/SHIPMENT/SERVICE[text()='BWTI_USPS.USPS.FCSP']")
+ * @param captureDataObject Array of XPath expressions to capture (e.g., ["/SHIPMENT/PACKAGE/PS_VOID_ID"])
+ *
+ * @example Validation examples:
+ *   - "/SHIPMENT/SERVICE" - Check if SERVICE exists
+ *   - "/SHIPMENT/SERVICE[text()='BWTI_USPS.USPS.FCSP']" - Exact match
+ *   - "/SHIPMENT/SERVICE[text()!='GROUND']" - Not equal
+ *   - "/SHIPMENT/WEIGHT[text()>0]" - Greater than
+ *   - "/SHIPMENT/SERVICE[contains(text(),'USPS')]" - Contains
+ *   - "/SHIPMENT/SERVICE[starts-with(text(),'BWTI')]" - Starts with
+ *   - "/SHIPMENT/SERVICE[normalize-space(text())='VALUE']" - Normalize spaces
  */
 export function handlePostResponseXML(
     pm: any,
     controllerName: string = "Controller",
     validationObject?: string,
-    captureDataObject: string[] = [],
-    expectedValue?: string
+    captureDataObject: string[] = []
 ): void {
     let validatedValue: any = null;
     let xmlObject: any = {};
@@ -305,70 +388,15 @@ export function handlePostResponseXML(
     }
 
     if (pm.response.code === 200) {
-        // 1. Process Validation Object (XPath expression) - validate only, no collection variables set
+        // 1. Process Validation Object (XPath expression with predicates)
         if (validationObject) {
             validatedValue = getXmlValue(xmlObject, validationObject);
+            const isValid = validatedValue !== undefined && validatedValue !== null;
 
-            let isValid: boolean;
-            if (expectedValue !== undefined) {
-                // Parse operator and value from expectedValue
-                const operatorMatch = expectedValue.match(/^(!=|!==|===|==|>=|<=|>|<|~|contains)\s*(.*)$/);
-                let operator = '==';
-                let expectedVal = expectedValue;
+            console.log(isValid
+                ? `✅ Validation "${validationObject}" is a success.`
+                : `❌ Validation "${validationObject}" is a failure.`);
 
-                if (operatorMatch) {
-                    operator = operatorMatch[1];
-                    expectedVal = operatorMatch[2];
-                }
-
-                // Perform validation based on operator
-                switch (operator) {
-                    case '==':
-                    case '===':
-                        isValid = validatedValue === expectedVal;
-                        break;
-                    case '!=':
-                    case '!==':
-                        isValid = validatedValue !== expectedVal;
-                        break;
-                    case '>':
-                        isValid = Number(validatedValue) > Number(expectedVal);
-                        break;
-                    case '<':
-                        isValid = Number(validatedValue) < Number(expectedVal);
-                        break;
-                    case '>=':
-                        isValid = Number(validatedValue) >= Number(expectedVal);
-                        break;
-                    case '<=':
-                        isValid = Number(validatedValue) <= Number(expectedVal);
-                        break;
-                    case '~':
-                        // Regex match
-                        try {
-                            const regex = new RegExp(expectedVal);
-                            isValid = regex.test(validatedValue);
-                        } catch (e) {
-                            isValid = false;
-                        }
-                        break;
-                    case 'contains':
-                        isValid = String(validatedValue).includes(expectedVal);
-                        break;
-                    default:
-                        isValid = validatedValue === expectedVal;
-                }
-
-                console.log(isValid
-                    ? `✅ Validation "${validationObject}" ${operator} "${expectedVal}" is a success.`
-                    : `❌ Validation "${validationObject}" ${operator} "${expectedVal}" is a failure. Got: "${validatedValue}"`);
-            } else {
-                // Just check if value exists
-                isValid = validatedValue !== undefined && validatedValue !== null;
-                console.log(isValid
-                    ? `✅ Validation "${validationObject}" is a success.`
-                    : `❌ Validation "${validationObject}" is a failure.`);
-            }
             validatedValue = isValid ? validatedValue : null;
         }
 
